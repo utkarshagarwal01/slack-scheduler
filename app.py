@@ -7,6 +7,7 @@ from selenium.webdriver.common.by import By
 import json
 import urllib
 import os
+import logging
 from time import sleep
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -54,8 +55,7 @@ class JoltProject():
             return []
         
         finally:
-            pass
-            # self.driver.close()
+            self.driver.close()
 
 
     def get_scheduling_url(self):
@@ -78,24 +78,26 @@ class JoltProject():
 
     def build_shift_data_from_schedules(self, schedules):
         
-        def get_time_formatted(timestamp):
-            time = datetime.fromtimestamp(timestamp)
-            format_string = "%I{0}%p".format("" if time.minute == 0 else ":%M")
-            return time.strftime(format_string)
-        
-        s = {3:[], 2:[], 1:[]}
+        s = {3:{}, 2:{}, 1:{}}
         for shift in schedules:
-            name, level, startTime, endTime = shift["person"]["firstName"], shift["role"]["name"], shift["startTime"], shift["endTime"]
-            startTime = get_time_formatted(startTime)
-            endTime = get_time_formatted(endTime)
-            string = "{0} {1}-{2}".format(name, startTime, endTime)
+            name, id = shift["person"]["firstName"], shift["person"]["id"]
+            level  = shift["role"]["name"]
+            startTime, endTime = shift["startTime"], shift["endTime"]
+            
             if "L3" in level:
                 key = 3
             elif "L1" in level:
                 key = 1
             else:
                 key = 2
-            s[key].append(string)
+            
+            if name not in s[key]:
+                s[key][name] = []
+        
+            if s[key][name] and s[key][name][-1][1] == startTime:
+                s[key][name][-1][1] = endTime
+            else:
+                s[key][name].append([startTime, endTime])
 
         return s
 
@@ -104,12 +106,69 @@ class JoltProject():
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
 class PostSlackMessage():
 
     def __init__(self) -> None:
-        # self.client = WebClient(token=)
-        pass
+        self.client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
+        logger = logging.getLogger(__name__)
 
+    def get_time_formatted(self, timestamp, showMeridiem=True):
+        time = datetime.fromtimestamp(timestamp)
+        format_string = "%I{0}{1}".format("" if time.minute == 0 else ":%M", "%p" if showMeridiem else "")
+        return time.strftime(format_string)
+    
+    def get_channel_id(self):
+        channel_name = "is-students"
+        conversation_id = None
+        try:
+            # Call the conversations.list method using the WebClient
+            for result in self.client.conversations_list():
+                if conversation_id is not None:
+                    break
+                for channel in result["channels"]:
+                    if channel["name"] == channel_name:
+                        conversation_id = channel["id"]
+                        return conversation_id
+                    
+        except SlackApiError as e:
+            print(f"Error: {e}")
+            return None
+
+    def construct_mesage(self, shift_data):
+        level_map = {3: "Tier 3", 2: "Spec Ops", 1: "Tier 1"}
+        text = "Good Morning all, Here's the Labs Student Schedule for today:"
+        for level, student_dict in shift_data.items():
+            text += "\n{0}: ".format(level_map[level])
+            c = 0
+            for name, shifts in student_dict.items():
+                if c != 0:
+                    text += ", "
+                text += "*{0}* ".format(name.strip())
+                text += " & ".join(["{0}-{1}".format(self.get_time_formatted(s, False), self.get_time_formatted(e)) for s,e in shifts]) 
+                c += 1
+        print(text)    
+        return [{
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": text,
+            }
+        }]
+
+    def postMessage(self, channel_id, blocks):
+        try:
+            # Call the conversations.list method using the WebClient
+            result = self.client.chat_postMessage(
+                channel=channel_id,
+                blocks=blocks
+                # You could also use a blocks[] array to send richer content
+            )
+            # Print result, which includes information about the message (like TS)
+            print(result)
+
+        except SlackApiError as e:
+            print(f"Error: {e}")
 
 
 if __name__ == "__main__":
@@ -117,6 +176,10 @@ if __name__ == "__main__":
     jolt.login()
     schedules = jolt.invoke_schedule_api()
     shift_data = jolt.build_shift_data_from_schedules(schedules)
+
+    slack = PostSlackMessage()
+    slack.construct_mesage(shift_data)
+
     print(shift_data)
     print(jolt.error_message)
-    sleep(1000)
+    sleep(10)
