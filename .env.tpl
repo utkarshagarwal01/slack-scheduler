@@ -1,0 +1,4 @@
+JOLT_EMAIL=test@illinois.edu
+JOLT_PASSWORD=password
+
+SLACK_BOT_TOKEN=XYZ_ABC
