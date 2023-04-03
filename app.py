@@ -111,7 +111,6 @@ class PostSlackMessage():
 
     def __init__(self) -> None:
         self.client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
-        logger = logging.getLogger(__name__)
 
     def get_time_formatted(self, timestamp, showMeridiem=True):
         time = datetime.fromtimestamp(timestamp)
@@ -119,7 +118,7 @@ class PostSlackMessage():
         return time.strftime(format_string)
     
     def get_channel_id(self):
-        channel_name = "is-students"
+        channel_name = os.getenv("SLACK_CHANNEL_NAME")
         conversation_id = None
         try:
             # Call the conversations.list method using the WebClient
@@ -178,7 +177,9 @@ if __name__ == "__main__":
     shift_data = jolt.build_shift_data_from_schedules(schedules)
 
     slack = PostSlackMessage()
-    slack.construct_mesage(shift_data)
+    channel_id = slack.get_channel_id()
+    blocks = slack.construct_mesage(shift_data)
+    slack.postMessage(channel_id, blocks)
 
     print(shift_data)
     print(jolt.error_message)
